@@ -1,0 +1,124 @@
+version: '3'
+
+vars:
+  PROJECT_NAME:
+    sh: basename "$(pwd)"
+  WORKSPACE: .
+  BIN_DIR: bin
+
+tasks:
+
+  ## --- INITIALISATION & CONFIGURATION ---
+
+  setup:
+    desc: Génère la configuration Docker, VS Code et le .gitignore si absents
+    internal: true
+    cmds:
+      - mkdir -p .devcontainer
+      # Génération du Dockerfile (Utilise l'image Go par défaut pour être à jour pour templ)
+      - |
+        cat << 'EOF' > .devcontainer/Dockerfile
+        FROM mcr.microsoft.com/devcontainers/go
+
+        # Installation d'outils supplémentaires pour le développement Go
+        USER vscode
+        RUN go install github.com/swaggo/swag/cmd/swag@latest && \
+            go install github.com/a-h/templ/cmd/templ@latest
+        EOF
+      # Génération du devcontainer.json épuré avec support des extensions VS Code
+      - |
+        cat << 'EOF' > .devcontainer/devcontainer.json
+        {
+            "name": "{{.PROJECT_NAME}} Environment",
+            "build": {
+                "dockerfile": "Dockerfile"
+            },
+            "remoteUser": "vscode",
+            "customizations": {
+                "vscode": {
+                    "extensions": [
+                        "golang.go",
+                        "a-h.templ"
+                    ]
+                }
+            }
+        }
+        EOF
+      # Génération du .gitignore
+      - |
+        cat << 'EOF' > .gitignore
+        bin/
+        dist/
+        *.exe
+        *.exe~
+        *.dll
+        *.so
+        *.dylib
+        .env
+        .devcontainer/context/
+        EOF
+    status:
+      - test -f .devcontainer/devcontainer.json
+      - test -f .devcontainer/Dockerfile
+      - test -f .gitignore
+
+  init:
+    desc: Initialise le dépôt Git, l'environnement Docker et le module Go
+    deps: [setup]
+    cmds:
+      - git init
+      - task: up
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} go mod init {{.PROJECT_NAME}}
+    status:
+      - test -f go.mod
+
+  ## --- GESTION DU CONTENEUR ---
+
+  up:
+    desc: Démarre le devcontainer
+    deps: [setup]
+    cmds:
+      - devcontainer up --workspace-folder {{.WORKSPACE}}
+
+  shell:
+    desc: Ouvre un terminal interactif dans le conteneur
+    interactive: true
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} bash
+
+  down:
+    desc: Arrête et supprime le conteneur
+    cmds:
+      - docker rm -f $(docker ps -aq --filter label=devcontainer.local_folder="$(pwd)")
+
+  ## --- CYCLE DE VIE GO ---
+
+  run:
+    desc: Exécute l'application dans le conteneur
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} go run main.go
+
+  build:
+    desc: Compile l'application dans le dossier bin/ local
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} go build -o {{.BIN_DIR}}/{{.PROJECT_NAME}} main.go
+
+  test:
+    desc: Lance les tests unitaires dans le conteneur
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} go test -v ./...
+
+  ## --- FLUX GIT ---
+
+  sync:
+    desc: Formate le code, valide les tests et indexe les modifications (git add)
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} go fmt ./...
+      - task: test
+      - git add .
+
+  commit:
+    desc: Valide le commit avec message (lance la commande git commit)
+    cmds:
+      - git commit -v
