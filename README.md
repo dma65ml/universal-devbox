@@ -30,7 +30,7 @@ Pour utiliser ce projet, seuls trois outils doivent être installés sur votre m
 2.  **Taskfile** : Le moteur d'exécution de tâches basé sur YAML.
     *   [Documentation et Installation de Taskfile](https://taskfile.dev)
 3.  **Devcontainer CLI** : L'outil en ligne de commande pour piloter les environnements conteneurisés.
-    *   [Documentation et Installation de Devcontainer CLI](https://code.visualstudio.com/docs/devcontainers/devcontainer-cli)
+    *   [Documentation et Installation de Devcontainer CLI](https://github.com/devcontainers/cli)
 4.  **Docker** (ou un moteur compatible) : Nécessaire pour faire tourner le conteneur en arrière-plan.
 
 ---
@@ -57,6 +57,72 @@ Ce boilerplate est nativement compatible avec les éditeurs modernes supportant 
 ├── go.mod
 ├── main.go
 └── main_test.go
+```
+
+---
+## 🏁 Guide de démarrage rapide
+
+### Étape 1 : Initialisation
+
+Créez un répertoire vide nommé `universal-devbox`, déposez-y le fichier `Taskfile.yml` global et lancez la commande suivante :
+
+Bash
+
+```
+task init
+```
+
+**Ce que fait cette tâche automatiquement :**
+
+1. Génère un `.gitignore` propre pour isoler le dossier `bin/`.
+    
+2. Génère le dossier `.devcontainer/` avec un `Dockerfile` personnalisé contenant les outils `swag` et `templ`.
+    
+3. Initialise le dépôt Git local (`git init`).
+    
+4. Construit l'image et démarre le conteneur en arrière-plan via `devcontainer up`.
+    
+5. Initialise le module Go (`go mod init universal-devbox`) **dans** le conteneur de manière isolée.
+    
+### Étape 2 : Écriture du code
+
+Créez vos fichiers applicatifs à la racine depuis votre éditeur local.
+
+**`main.go`**
+
+Go
+
+```
+package main
+
+import "fmt"
+
+// Greet retourne un message de salutation standard.
+func Greet() string {
+	return "Hello, World!"
+}
+
+func main() {
+	fmt.Println(Greet())
+}
+```
+
+**`main_test.go`**
+
+Go
+
+```
+package main
+
+import "testing"
+
+// TestGreet vérifie la validité de la fonction Greet.
+func TestGreet(t *testing.T) {
+	expected := "Hello, World!"
+	if got := Greet(); got != expected {
+		t.Errorf("Greet() = %q; attendu %q", got, expected)
+	}
+}
 ```
 
 ---
