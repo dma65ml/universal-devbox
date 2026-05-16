@@ -1,0 +1,127 @@
+version: '3'
+
+vars:
+  PROJECT_NAME:
+    sh: basename "$(pwd)"
+  WORKSPACE: .
+  BIN_DIR: bin
+
+tasks:
+
+  ## --- INITIALISATION & CONFIGURATION ---
+
+  setup:
+    desc: Génère la configuration Docker, l'environnement et le .gitignore si absents
+    internal: true
+    cmds:
+      - mkdir -p .devcontainer
+      # Génération du Dockerfile (.NET 8 LTS ou .NET 9 selon vos besoins)
+      - |
+        cat << 'EOF' > .devcontainer/Dockerfile
+        FROM mcr.microsoft.com/devcontainers/dotnet:1-8.0-bookworm
+
+        # Installation optionnelle d'outils globaux .NET (ex: Entity Framework CLI)
+        USER vscode
+        RUN dotnet tool install --global dotnet-ef
+        ENV PATH="${PATH}:/home/vscode/.dotnet/tools"
+        EOF
+      # Génération du devcontainer.json avec extensions C# pour VS Code / Zed
+      - |
+        cat << 'EOF' > .devcontainer/devcontainer.json
+        {
+            "name": "{{.PROJECT_NAME}} Environment",
+            "build": {
+                "dockerfile": "Dockerfile"
+            },
+            "remoteUser": "vscode",
+            "customizations": {
+                "vscode": {
+                    "extensions": [
+                        "ms-dotnettools.csharp",
+                        "ms-dotnettools.csdevkit"
+                    ]
+                }
+            }
+        }
+        EOF
+      # Génération du .gitignore spécifique à l'écosystème .NET
+      - |
+        cat << 'EOF' > .gitignore
+        # Dossiers de build et dépendances
+        bin/
+        obj/
+        
+        # Outils et caches de dev
+        .devcontainer/context/
+        .env
+        UserSecrets/
+        
+        # Fichiers de crash ou logs
+        *.log
+        .ionide/
+        EOF
+    status:
+      - test -f .devcontainer/devcontainer.json
+      - test -f .devcontainer/Dockerfile
+      - test -f .gitignore
+
+  init:
+    desc: Initialise le dépôt Git, l'environnement Docker et la solution .NET
+    deps: [setup]
+    cmds:
+      - git init
+      - task: up
+      # Crée une application console et une solution globale dans le conteneur
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet new console -n {{.PROJECT_NAME}} --output .
+    status:
+      - test -f {{.PROJECT_NAME}}.csproj
+
+  ## --- GESTION DU CONTENEUR ---
+
+  up:
+    desc: Démarre le devcontainer
+    deps: [setup]
+    cmds:
+      - devcontainer up --workspace-folder {{.WORKSPACE}}
+
+  shell:
+    desc: Ouvre un terminal interactif dans le conteneur (accès à dotnet-ef, etc.)
+    interactive: true
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} bash
+
+  down:
+    desc: Arrête et supprime le conteneur
+    cmds:
+      - docker rm -f $(docker ps -aq --filter label=devcontainer.local_folder="$(pwd)")
+
+  ## --- CYCLE DE VIE .NET ---
+
+  run:
+    desc: Exécute l'application .NET dans le conteneur
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet run
+
+  build:
+    desc: Compile l'application en mode Release
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet build -c Release
+
+  test:
+    desc: Lance les tests (si un projet de test existe)
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet test
+
+  ## --- FLUX GIT ---
+
+  sync:
+    desc: Formate le code (dotnet format), valide et indexe les fichiers (git add)
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet format
+      - task: build
+      - git add .
+
+  commit:
+    desc: Valide le commit avec message (lance la commande git commit)
+    cmds:
+      - git commit -v
