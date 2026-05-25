@@ -1,0 +1,141 @@
+version: "3"
+
+vars:
+  PROJECT_NAME:
+    sh: basename "$(pwd)"
+  WORKSPACE: .
+  SRC_DIR: src
+  BIN_DIR: bin
+  OBJ_DIR: obj
+  PORT: 5050
+
+tasks:
+  ## --- INITIALISATION & CONFIGURATION ---
+
+  setup:
+    desc: Génère la configuration Docker et l'environnement ASP.NET 8
+    internal: true
+    cmds:
+      - |
+        echo '{{.PROJECT_NAME}}' | grep -qE '^[a-zA-Z0-9_-]+$' \
+          || (echo "Erreur : PROJECT_NAME '{{.PROJECT_NAME}}' contient des caractères invalides (autorisés : a-z A-Z 0-9 _ -)" && exit 1)
+      - mkdir -p .devcontainer
+      # Génération du Dockerfile (.NET 8 LTS)
+      - |
+        cat << 'EOF' > .devcontainer/Dockerfile
+        FROM mcr.microsoft.com/devcontainers/dotnet:1-8.0-bookworm
+
+        # Outils globaux optionnels
+        USER vscode
+        RUN dotnet tool install --global dotnet-ef
+        ENV PATH="${PATH}:/home/vscode/.dotnet/tools"
+        EOF
+      # Génération de devcontainer.json avec exposition du port applicatif
+      - |
+        cat << 'EOF' > .devcontainer/devcontainer.json
+        {
+            "name": "{{.PROJECT_NAME}} ASP.NET Environment",
+            "build": {
+                "dockerfile": "Dockerfile"
+            },
+            "remoteUser": "vscode",
+            "appPort": [{{.PORT}}],
+            "containerEnv": {
+                "ASPNETCORE_URLS": "http://+:{{.PORT}}",
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            },
+            "customizations": {
+                "vscode": {
+                    "extensions": [
+                        "ms-dotnettools.csharp",
+                        "ms-dotnettools.csdevkit"
+                    ]
+                }
+            }
+        }
+        EOF
+      # Génération du .gitignore
+      - |
+        cat << 'EOF' > .gitignore
+        bin/
+        obj/
+        .devcontainer/context/
+        .env
+        appsettings.Development.json
+        *.log
+        EOF
+    status:
+      - test -f .devcontainer/devcontainer.json
+      - test -f .devcontainer/Dockerfile
+      - test -f .gitignore
+      - grep -q "{{.PORT}}" .devcontainer/devcontainer.json
+
+  init:
+    desc: Initialise le dépôt Git et génère le projet ASP.NET Core (Minimal API)
+    deps: [setup]
+    cmds:
+      - git init
+      - task: up
+      # Création d'une API web minimaliste (KISS)
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet new web -n {{.PROJECT_NAME}} --output {{.SRC_DIR}}
+    status:
+      - test -f {{.SRC_DIR}}/{{.PROJECT_NAME}}.csproj
+
+  ## --- GESTION DU CONTENEUR ---
+
+  up:
+    desc: Démarre le devcontainer
+    deps: [setup]
+    cmds:
+      - devcontainer up --workspace-folder {{.WORKSPACE}}
+
+  shell:
+    desc: Ouvre un terminal interactif dans le conteneur
+    interactive: true
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} bash
+
+  down:
+    desc: Arrête et supprime le conteneur
+    cmds:
+      - docker ps -aq --filter label=devcontainer.local_folder="$(pwd)" | xargs --no-run-if-empty docker rm -f
+
+  ## --- CYCLE DE VIE ASP.NET ---
+
+  clean:
+    desc: Supprime les artefacts de compilation (bin/ et obj/ à la racine)
+    cmds:
+      - rm -rf {{.BIN_DIR}} {{.OBJ_DIR}} {{.SRC_DIR}}/bin {{.SRC_DIR}}/obj tests/sso1.Tests/bin tests/sso1.Tests/obj
+
+  run:
+    desc: Lance le serveur web ASP.NET (Hot Reload via dotnet watch)
+    interactive: true
+    cmds:
+      # Utilisation de 'watch' pour recharger l'API automatiquement à chaque sauvegarde
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet watch --project {{.SRC_DIR}} run --no-launch-profile --non-interactive
+
+  build:
+    desc: Compile l'application en mode Release
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet build {{.SRC_DIR}} -c Release
+
+  test:
+    desc: Lance les tests unitaires
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet test tests/sso1.Tests/
+
+  ## --- FLUX GIT ---
+
+  sync:
+    desc: Formate (dotnet format), valide la compilation et indexe (git add)
+    cmds:
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet format {{.SRC_DIR}}
+      - devcontainer exec --workspace-folder {{.WORKSPACE}} dotnet format tests/sso1.Tests/
+      - task: build
+      - git add {{.SRC_DIR}} tests/ Taskfile.yml
+
+  commit:
+    desc: Valide le commit avec message
+    cmds:
+      - git commit -v
+      
